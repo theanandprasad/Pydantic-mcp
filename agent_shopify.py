@@ -10,16 +10,34 @@ dotenv.load_dotenv()
 # Initialize LogFire
 logfire.configure()
 
-fetch_server = MCPServerStdio('python', ["-m", "mcp_server_fetch"])
+# Check for required environment variables
+required_env_vars = [
+    "ANTHROPIC_API_KEY",
+    "SHOPIFY_STORE_URL",
+    "SHOPIFY_ACCESS_TOKEN",
+    "SHOPIFY_API_VERSION"
+]
 
-# Check if API key is available in environment variables
-if not os.environ.get("ANTHROPIC_API_KEY"):
-    raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+missing_vars = [var for var in required_env_vars if not os.environ.get(var)]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+# Extract domain from store URL for MYSHOPIFY_DOMAIN
+store_url = os.environ.get("SHOPIFY_STORE_URL")
+myshopify_domain = store_url.replace("https://", "").replace("http://", "")
+if not myshopify_domain.endswith("myshopify.com"):
+    myshopify_domain = f"{myshopify_domain}.myshopify.com"
+
+fetch_server = MCPServerStdio('python', ["-m", "mcp_server_fetch"])
+shopify_server = MCPServerStdio('npx', ["-y", "shopify-mcp-server"], env={
+    "SHOPIFY_ACCESS_TOKEN": os.environ.get("SHOPIFY_ACCESS_TOKEN"),
+    "MYSHOPIFY_DOMAIN": os.environ.get("SHOPIFY_STORE_URL")
+})
 
 # The library will automatically use the API key from environment variables
 agent = Agent('anthropic:claude-3-5-sonnet-latest',
 instrument=True,
-mcp_servers=[fetch_server],
+mcp_servers=[fetch_server, shopify_server],
 )
 
 async def main():
