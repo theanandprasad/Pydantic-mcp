@@ -1,0 +1,278 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify Customer Data</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 20px; }
+        .loading { display: none; }
+        .spinner-border { width: 1rem; height: 1rem; }
+        pre.debug { background: #f5f5f5; padding: 10px; border-radius: 5px; max-height: 300px; overflow: auto; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">Shopify Customer Data</h1>
+        
+        <div class="row mb-4">
+            <div class="col">
+                <button id="refreshBtn" class="btn btn-primary">
+                    <span class="spinner-border spinner-border-sm loading" role="status" aria-hidden="true"></span>
+                    Refresh Data
+                </button>
+                <button id="loadMoreBtn" class="btn btn-secondary ms-2" style="display: none;">
+                    <span class="spinner-border spinner-border-sm loading" role="status" aria-hidden="true"></span>
+                    Load More
+                </button>
+                <button id="testConnBtn" class="btn btn-outline-info ms-2">
+                    Test Connection
+                </button>
+            </div>
+        </div>
+        
+        <div id="error-container" class="alert alert-danger" style="display: none;"></div>
+        <div id="success-container" class="alert alert-success" style="display: none;"></div>
+        
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Email</th>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Phone</th>
+                        <th>Orders Count</th>
+                        <th>Tags</th>
+                    </tr>
+                </thead>
+                <tbody id="customerTableBody">
+                    <!-- Customer data will be inserted here -->
+                </tbody>
+            </table>
+        </div>
+        
+        <div id="statusMessage" class="mt-3 text-muted"></div>
+        
+        <div class="mt-4">
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" 
+                   data-bs-target="#debugSection" aria-expanded="false">
+                Show Debug Info
+            </button>
+            <div class="collapse mt-2" id="debugSection">
+                <div class="card card-body">
+                    <h5>Debug Information</h5>
+                    <pre id="debugInfo" class="debug">No debug information available yet.</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const loadMoreBtn = document.getElementById('loadMoreBtn');
+            const testConnBtn = document.getElementById('testConnBtn');
+            const customerTableBody = document.getElementById('customerTableBody');
+            const statusMessage = document.getElementById('statusMessage');
+            const errorContainer = document.getElementById('error-container');
+            const successContainer = document.getElementById('success-container');
+            const debugInfo = document.getElementById('debugInfo');
+            
+            // Initial data load
+            fetchCustomers();
+            
+            // Refresh button click handler
+            refreshBtn.addEventListener('click', function() {
+                fetchCustomers(true);
+            });
+            
+            // Load more button click handler
+            loadMoreBtn.addEventListener('click', function() {
+                fetchCustomers(false);
+            });
+            
+            // Test connection button
+            testConnBtn.addEventListener('click', function() {
+                testConnection();
+            });
+            
+            function testConnection() {
+                setLoading(true);
+                errorContainer.style.display = 'none';
+                successContainer.style.display = 'none';
+                statusMessage.textContent = 'Testing connection to Shopify...';
+                
+                fetch('/api/test-connection')
+                    .then(response => response.json())
+                    .then(data => {
+                        setLoading(false);
+                        
+                        if (data.error) {
+                            showError(data.error);
+                            updateDebugInfo(data.debug || 'No debug info available');
+                            return;
+                        }
+                        
+                        successContainer.textContent = 'Connection to Shopify successful!';
+                        successContainer.style.display = 'block';
+                        statusMessage.textContent = 'Connection test completed successfully.';
+                        updateDebugInfo(data.debug || JSON.stringify(data, null, 2));
+                    })
+                    .catch(error => {
+                        setLoading(false);
+                        showError('Failed to test connection: ' + error.message);
+                    });
+            }
+            
+            function fetchCustomers(refresh = false) {
+                setLoading(true);
+                errorContainer.style.display = 'none';
+                successContainer.style.display = 'none';
+                
+                const url = refresh ? '/api/customers' : '/api/customers/more';
+                
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            showError(data.error);
+                            updateDebugInfo(data.debug || 'No debug info available');
+                            setLoading(false);
+                            return;
+                        }
+                        
+                        if (refresh) {
+                            customerTableBody.innerHTML = '';
+                        }
+                        
+                        // Update debug info
+                        updateDebugInfo(data.debug || JSON.stringify(data, null, 2));
+                        
+                        if (data.loading) {
+                            // Data is still loading, poll the status endpoint
+                            pollStatus();
+                        } else {
+                            // Data is already available
+                            renderCustomers(data.customers);
+                            statusMessage.textContent = `Displaying ${customerTableBody.children.length} customers`;
+                            loadMoreBtn.style.display = data.has_more ? 'inline-block' : 'none';
+                            setLoading(false);
+                        }
+                    })
+                    .catch(error => {
+                        showError('Failed to fetch customers: ' + error.message);
+                        setLoading(false);
+                    });
+            }
+            
+            function pollStatus() {
+                statusMessage.textContent = 'Polling for results...';
+                let pollCount = 0;
+                const maxPolls = 10; // Maximum number of polls before giving up
+                
+                const pollInterval = setInterval(() => {
+                    pollCount++;
+                    statusMessage.textContent = `Polling for results (attempt ${pollCount})...`;
+                    
+                    if (pollCount > maxPolls) {
+                        clearInterval(pollInterval);
+                        showError('Data loading timeout. Please try again.');
+                        setLoading(false);
+                        return;
+                    }
+                    
+                    fetch('/api/customers/status')
+                        .then(response => response.json())
+                        .then(data => {
+                            updateDebugInfo(data.debug || JSON.stringify(data, null, 2));
+                            
+                            if (data.error) {
+                                showError(data.error);
+                                clearInterval(pollInterval);
+                                setLoading(false);
+                                return;
+                            }
+                            
+                            if (!data.loading) {
+                                // Loading complete, render the data
+                                renderCustomers(data.customers);
+                                statusMessage.textContent = `Displaying ${customerTableBody.children.length} customers`;
+                                loadMoreBtn.style.display = data.has_more ? 'inline-block' : 'none';
+                                clearInterval(pollInterval);
+                                setLoading(false);
+                            }
+                        })
+                        .catch(error => {
+                            showError('Failed to check status: ' + error.message);
+                            clearInterval(pollInterval);
+                            setLoading(false);
+                        });
+                }, 2000); // Poll every 2 seconds
+            }
+            
+            function renderCustomers(customers) {
+                if (!customers || customers.length === 0) {
+                    statusMessage.textContent = 'No customers found';
+                    return;
+                }
+                
+                customers.forEach(customer => {
+                    const row = document.createElement('tr');
+                    
+                    row.innerHTML = `
+                        <td>${customer.id || ''}</td>
+                        <td>${customer.email || ''}</td>
+                        <td>${customer.firstName || customer.first_name || ''}</td>
+                        <td>${customer.lastName || customer.last_name || ''}</td>
+                        <td>${customer.phone || ''}</td>
+                        <td>${customer.ordersCount || customer.orders_count || 0}</td>
+                        <td>${customer.tags || ''}</td>
+                    `;
+                    
+                    customerTableBody.appendChild(row);
+                });
+                
+                // Log sample data for debugging
+                if (customers && customers.length > 0) {
+                    console.log("Sample customer object:", customers[0]);
+                }
+            }
+            
+            function updateDebugInfo(info) {
+                if (typeof info === 'object') {
+                    debugInfo.textContent = JSON.stringify(info, null, 2);
+                } else {
+                    debugInfo.textContent = info;
+                }
+            }
+            
+            function setLoading(isLoading) {
+                const loadingElements = document.querySelectorAll('.loading');
+                
+                if (isLoading) {
+                    refreshBtn.disabled = true;
+                    loadMoreBtn.disabled = true;
+                    testConnBtn.disabled = true;
+                    loadingElements.forEach(el => el.style.display = 'inline-block');
+                } else {
+                    refreshBtn.disabled = false;
+                    loadMoreBtn.disabled = false;
+                    testConnBtn.disabled = false;
+                    loadingElements.forEach(el => el.style.display = 'none');
+                }
+            }
+            
+            function showError(message) {
+                errorContainer.textContent = message;
+                errorContainer.style.display = 'block';
+                statusMessage.textContent = 'Error occurred. See details above.';
+            }
+        });
+    </script>
+</body>
+</html>
