@@ -5,6 +5,9 @@ import dotenv
 import logfire
 import json
 import sys
+import time
+import random
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 # Load environment variables from .env file if it exists
 dotenv.load_dotenv()
@@ -117,6 +120,30 @@ CITY_MAPPINGS = {
     # Add more cities as needed
 }
 
+# Define a custom exception for rate limit errors
+class RateLimitException(Exception):
+    pass
+
+# Define a custom retry function for the agent
+@retry(
+    wait=wait_exponential(multiplier=1, min=4, max=60),  # Start with 4s, exponentially increase up to 60s
+    stop=stop_after_attempt(5),  # Try up to 5 times
+    retry=retry_if_exception_type(RateLimitException)
+)
+async def run_agent_with_retry(agent, message, message_history=None):
+    try:
+        return await agent.run(message, message_history=message_history)
+    except Exception as e:
+        error_str = str(e)
+        if "rate_limit_error" in error_str or "status_code: 429" in error_str:
+            logfire.warning(f"Rate limit hit. Retrying with backoff: {error_str}")
+            # Add jitter to avoid synchronized retries in case of multiple instances
+            time.sleep(random.uniform(0.1, 1.0))
+            raise RateLimitException(error_str)
+        else:
+            # Re-raise other exceptions
+            raise
+
 async def main():
     # Initial prompt that explains agent capabilities
     initial_prompt = """
@@ -125,6 +152,7 @@ async def main():
     - 99acres.com
     - housing.com
     - nobroker.com
+    - https://www.reddit.com/r/indianrealestate/
     
     Tell me what kind of property you're looking for (buy/rent, location, budget, size, 
     number of bedrooms, etc.) and I'll browse these sites to find matching options.
@@ -143,7 +171,7 @@ async def main():
         # First install the browser if needed
         try:
             print("Installing browser components if needed...")
-            install_result = await agent.run("""
+            install_result = await run_agent_with_retry(agent, """
             Please run the browser installation command to ensure Playwright is set up correctly.
             Use the browser_install function.
             """)
@@ -160,7 +188,7 @@ async def main():
         print("Real Estate Property Search Assistant")
         print("="*50 + "\n")
         
-        result = await agent.run(initial_prompt)
+        result = await run_agent_with_retry(agent, initial_prompt)
         while True:
             # Log the agent's response
             logfire.info("Agent response", response=result.data)
@@ -174,9 +202,8 @@ async def main():
             logfire.info("User input", input=user_input)
             # Run the agent with the user input
             try:
-                result = await agent.run(user_input, 
-                                        message_history=result.new_messages(),
-                                        )
+                result = await run_agent_with_retry(agent, user_input, 
+                                        message_history=result.new_messages())
             except Exception as e:
                 error_msg = f"Error during agent run: {str(e)}"
                 logfire.error(error_msg)
@@ -185,7 +212,7 @@ async def main():
                 
                 # Try to close browser gracefully on error
                 try:
-                    await agent.run("Please close the browser using browser_close")
+                    await run_agent_with_retry(agent, "Please close the browser using browser_close")
                 except:
                     pass
 
