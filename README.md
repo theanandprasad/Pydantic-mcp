@@ -85,3 +85,63 @@ If you encounter any issues:
 ## License
 
 [MIT License](LICENSE)
+
+## Gmail Management Agent
+
+The `agent_gmail.py` script provides an AI assistant that can help manage your Gmail inbox using natural language commands.
+
+### Features
+
+- Send emails with subject, content, and recipients (including CC and BCC)
+- Create draft emails without sending
+- Read specific emails by ID
+- Search emails using Gmail's search syntax
+- List emails from inbox, sent, or custom labels
+- Mark emails as read/unread
+- Move emails to different labels/folders
+- Delete emails
+- Batch process multiple emails at once
+- List all available Gmail labels
+- Create, rename, and delete labels
+
+### Setup
+
+1. Ensure you have the required dependencies:
+```
+pip install -r requirements.txt
+```
+
+2. Create an OAuth client ID in Google Cloud Platform:
+   - Go to the [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select an existing one
+   - Enable the Gmail API
+   - Create OAuth 2.0 credentials (Web or Desktop application)
+   - Download the credentials as JSON
+
+3. Place your credentials file (named `gcp-oauth.keys.json`) in either:
+   - Your current working directory, or
+   - `~/.gmail-mcp/` directory
+
+4. Set your Anthropic API key in the `.env` file:
+```
+ANTHROPIC_API_KEY=your_api_key_here
+```
+
+### Usage
+
+Run the Gmail agent:
+
+```
+python agent_gmail.py
+```
+
+The first time you run the agent, it will guide you through the OAuth authentication process to connect to your Gmail account.
+
+After authentication, you can interact with your Gmail inbox using natural language commands like:
+- "Show me my unread emails"
+- "Search for emails from john@example.com with attachments"
+- "Send an email to sarah@example.com with subject Meeting Tomorrow"
+- "Create a new label called Projects"
+- "Move emails from john@example.com to the Projects label"
+
+Type 'exit', 'quit', or 'bye' to end the session.
