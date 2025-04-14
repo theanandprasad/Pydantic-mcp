@@ -41,10 +41,11 @@ This agent uses Pydantic AI and Microsoft's Playwright MCP to browse real estate
    npm install -g @playwright/mcp@latest
    ```
 
-4. Create a `.env` file in the project root with your Anthropic API key:
+4. Create a `.env` file in the project root by copying the example:
    ```
-   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   cp .env.example .env
    ```
+   Then add your actual API keys to the `.env` file. Never commit your actual API keys to version control.
 
 ## Running the Agent
 
@@ -145,3 +146,65 @@ After authentication, you can interact with your Gmail inbox using natural langu
 - "Move emails from john@example.com to the Projects label"
 
 Type 'exit', 'quit', or 'bye' to end the session.
+
+## Shopify Management Agent
+
+The `agent_shopify.py` script provides an AI assistant that can help manage your Shopify store using natural language commands.
+
+### Features
+
+- View and search customers in your Shopify store
+- Get customer details and order history
+- Create and manage products
+- Check inventory levels
+- View and process orders
+- Manage collections and discounts
+- Get store analytics and sales data
+
+### Setup
+
+1. Ensure you have the required dependencies:
+```
+pip install -r requirements.txt
+```
+
+2. Set up your Shopify credentials in the `.env` file:
+```
+SHOPIFY_STORE_URL=your-store.myshopify.com
+SHOPIFY_ACCESS_TOKEN=your_access_token
+SHOPIFY_API_VERSION=2024-04
+ANTHROPIC_API_KEY=your_anthropic_api_key
+```
+
+3. To get your Shopify Access Token:
+   - Log in to your Shopify Admin
+   - Go to Apps > Develop apps
+   - Create a custom app with the necessary scopes
+   - Generate an admin API access token
+
+### Usage
+
+Run the Shopify agent:
+
+```
+python agent_shopify.py
+```
+
+You can interact with your Shopify store using natural language commands like:
+- "Show me a list of customers"
+- "Search for customers who purchased in the last month"
+- "Show me inventory for product X"
+- "List all orders with status 'unfulfilled'"
+- "Show me sales data for last week"
+
+Type 'exit', 'quit', or 'bye' to end the session.
+
+## Security Best Practices
+
+When using this repository:
+
+1. Never commit sensitive information like API keys or tokens to git
+2. Use environment variables for all secrets as shown in `.env.example`
+3. Regenerate any tokens or API keys if they are accidentally exposed
+4. Make sure `.env` is in your `.gitignore` file (already set up)
+5. For the Gmail agent, store OAuth credentials outside the repository
