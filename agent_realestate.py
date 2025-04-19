@@ -16,20 +16,22 @@ dotenv.load_dotenv()
 logfire.configure()
 
 # Check if API key is available in environment variables
-if not os.environ.get("ANTHROPIC_API_KEY"):
+api_key = os.environ.get("ANTHROPIC_API_KEY")
+if not api_key:
     raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+
+print(f"Using API key: {api_key[:8]}...")
 
 # Set up the MCP servers
 fetch_server = MCPServerStdio('python', ["-m", "mcp_server_fetch"])
 
-# Configure Playwright MCP server with headed mode for better debugging
-# Add additional arguments based on the Playwright MCP documentation
+# Configure Playwright MCP server in headless mode (no visible browser window)
 playwright_server = MCPServerStdio(
     'npx', 
-    ["@playwright/mcp@latest"],  # Default mode for normal usage
+    ["@playwright/mcp@latest", "--headless"],  # Just use headless flag, we'll handle permissions with JavaScript
     env={
-        # Set any required environment variables for Playwright
         "PLAYWRIGHT_BROWSERS_PATH": os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "0"),
+        "PLAYWRIGHT_HEADLESS": "true"
     }
 )
 
@@ -62,7 +64,8 @@ When comparing properties, organize them clearly by price, location, or features
 """
 
 agent = Agent(
-    'anthropic:claude-3-5-sonnet-latest',
+    model='claude-3-5-sonnet-latest',
+    api_key=api_key,
     instrument=True,
     mcp_servers=[fetch_server, playwright_server],
     system_prompt=SYSTEM_PROMPT
@@ -120,6 +123,164 @@ CITY_MAPPINGS = {
     # Add more cities as needed
 }
 
+# Custom user agents to appear more like real browsers
+USER_AGENTS = [
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0"
+]
+
+# Set realistic geolocation coordinates for Indian cities
+CITY_GEOLOCATION = {
+    "bangalore": {"latitude": 12.9716, "longitude": 77.5946},
+    "mumbai": {"latitude": 19.0760, "longitude": 72.8777},
+    "delhi": {"latitude": 28.7041, "longitude": 77.1025},
+    "hyderabad": {"latitude": 17.3850, "longitude": 78.4867},
+    "chennai": {"latitude": 13.0827, "longitude": 80.2707},
+    "pune": {"latitude": 18.5204, "longitude": 73.8567},
+    "hsr": {"latitude": 12.9116, "longitude": 77.6521},  # HSR Layout in Bangalore
+    "bellandur": {"latitude": 12.9282, "longitude": 77.6776}  # Bellandur in Bangalore
+}
+
+# More comprehensive JavaScript to handle browser permissions
+BROWSER_PERMISSIONS_SCRIPT = """
+// Hide Webdriver flag to prevent bot detection
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+// Set user agent
+const userAgent = "%s";
+Object.defineProperty(navigator, 'userAgent', { get: () => userAgent });
+
+// Mock geolocation API
+const mockGeolocation = {
+  getCurrentPosition: (success) => {
+    success({
+      coords: {
+        latitude: %s,
+        longitude: %s,
+        accuracy: 100,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      },
+      timestamp: Date.now()
+    });
+  },
+  watchPosition: (success) => {
+    success({
+      coords: {
+        latitude: %s,
+        longitude: %s,
+        accuracy: 100,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null
+      },
+      timestamp: Date.now()
+    });
+    return 0;
+  },
+  clearWatch: () => {}
+};
+
+// Override the geolocation API
+navigator.geolocation = mockGeolocation;
+
+// Override permissions API to always return granted
+if (navigator.permissions) {
+  navigator.permissions.query = (parameters) => {
+    return Promise.resolve({ state: 'granted', onchange: null });
+  };
+}
+
+console.log("Browser permissions and identity configured successfully");
+"""
+
+# Simpler setup instructions that work with Playwright MCP
+BROWSER_SETUP_INSTRUCTIONS = """
+Please follow these steps to set up the headless browser:
+
+1. First, use browser_install to install the necessary browser components
+2. Navigate to about:blank using browser_navigate
+3. Use browser_execute_javascript to run this script that sets up all permissions:
+
+```javascript
+%s
+```
+
+4. Test that the permissions are working by navigating to a simple website like example.com
+5. Let me know when the browser is ready for searches
+"""
+
+# JavaScript to automatically handle cookie popups and other blocking elements
+COOKIE_CONSENT_BYPASS_SCRIPT = """
+function bypassCookieConsent() {
+  // Common cookie consent button selectors
+  const cookieSelectors = [
+    // Common cookie accept buttons
+    'button[id*="accept"], button[class*="accept"], button[id*="cookie"], button[class*="cookie"]',
+    'a[id*="accept"], a[class*="accept"], a[id*="cookie"], a[class*="cookie"]',
+    // Common popup close buttons
+    'button[class*="close"], a[class*="close"], div[class*="close"]',
+    // Specific selectors for common cookie banners
+    '.cc-accept', '#cookieAccept', '.cookie-accept', '#cookie-banner button',
+    // Common consent framework selectors
+    '#onetrust-accept-btn-handler',
+    '.js-accept-cookies',
+    // Indian real estate sites specific selectors
+    '.cookieNotification__Button', '.cookie-accept-btn',
+    // General popup closing
+    '.modal-close', '.popup-close'
+  ];
+  
+  // Try all selectors
+  for (const selector of cookieSelectors) {
+    const elements = document.querySelectorAll(selector);
+    for (const el of elements) {
+      if (el.innerText && el.innerText.match(/accept|agree|allow|consent|okay|got it|i understand|yes/i)) {
+        console.log('Clicking consent button:', el);
+        el.click();
+        return true;
+      }
+    }
+  }
+  
+  // More aggressive approach - find buttons with relevant text
+  const allButtons = document.querySelectorAll('button, a.button, input[type="button"], input[type="submit"]');
+  for (const button of allButtons) {
+    if (button.innerText && button.innerText.match(/accept|agree|allow|cookies|consent|okay|got it|i understand|yes/i)) {
+      if (!button.innerText.match(/decline|reject|not now|dismiss/i)) {
+        console.log('Found text-based consent button:', button);
+        button.click();
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+// Execute the bypass function
+bypassCookieConsent();
+
+// Also try to remove common overlay elements
+const overlaySelectors = ['.overlay', '.modal', '.popup', '.cookie-banner', '.cookie-policy', '.consent-popup'];
+for (const selector of overlaySelectors) {
+  const elements = document.querySelectorAll(selector);
+  for (const el of elements) {
+    el.style.display = 'none';
+  }
+}
+
+// Remove scroll blocking
+document.body.style.overflow = 'auto';
+document.documentElement.style.overflow = 'auto';
+"""
+
 # Define a custom exception for rate limit errors
 class RateLimitException(Exception):
     pass
@@ -143,6 +304,72 @@ async def run_agent_with_retry(agent, message, message_history=None):
         else:
             # Re-raise other exceptions
             raise
+
+async def visit_website_with_bypass(agent, url, city=None):
+    """Visit a website and attempt to bypass cookie consent and other blocking elements."""
+    try:
+        print(f"Navigating to {url}...")
+        
+        # Navigate to the website
+        navigate_result = await run_agent_with_retry(agent, f"Please navigate to {url}")
+        
+        # Wait a moment for the page to load
+        time.sleep(2)
+        
+        # Execute the cookie consent bypass script
+        cookie_bypass_prompt = f"""
+        The page may have cookie consent popups or other blocking elements.
+        Please execute this JavaScript to bypass them:
+        
+        ```javascript
+        {COOKIE_CONSENT_BYPASS_SCRIPT}
+        ```
+        """
+        
+        cookie_bypass_result = await run_agent_with_retry(agent, cookie_bypass_prompt)
+        
+        # If a city is specified, try to set location
+        if city and city in CITY_GEOLOCATION:
+            location = CITY_GEOLOCATION[city]
+            geo_script = f"""
+            // Override geolocation for {city}
+            const mockGeolocation = {{
+              getCurrentPosition: (success) => {{
+                success({{
+                  coords: {{
+                    latitude: {location['latitude']},
+                    longitude: {location['longitude']},
+                    accuracy: 100,
+                    altitude: null,
+                    altitudeAccuracy: null,
+                    heading: null,
+                    speed: null
+                  }},
+                  timestamp: Date.now()
+                }});
+              }},
+              watchPosition: () => 0,
+              clearWatch: () => {{}}
+            }};
+            navigator.geolocation = mockGeolocation;
+            console.log("Geolocation set to {city}");
+            """
+            
+            # Set geolocation
+            geo_result = await run_agent_with_retry(
+                agent,
+                f"Please execute this JavaScript to set geolocation to {city}:\n```javascript\n{geo_script}\n```"
+            )
+        
+        print(f"Successfully loaded {url} with bypass measures")
+        
+        # Wait for any search forms to load
+        time.sleep(3)
+        
+        return True
+    except Exception as e:
+        print(f"Error visiting {url}: {str(e)}")
+        return False
 
 async def main():
     # Initial prompt that explains agent capabilities
@@ -170,13 +397,33 @@ async def main():
         
         # First install the browser if needed
         try:
-            print("Installing browser components if needed...")
-            install_result = await run_agent_with_retry(agent, """
-            Please run the browser installation command to ensure Playwright is set up correctly.
-            Use the browser_install function.
-            """)
-            logfire.info("Browser installation", result=install_result.data)
-            print("Browser setup complete")
+            print("Installing browser components in headless mode...")
+            
+            # Choose a random user agent and location
+            user_agent = random.choice(USER_AGENTS)
+            location = CITY_GEOLOCATION.get("bangalore")  # Default to Bangalore
+            
+            # Build the permission script with our variables
+            permissions_script = BROWSER_PERMISSIONS_SCRIPT % (
+                user_agent,
+                location["latitude"],
+                location["longitude"],
+                location["latitude"],
+                location["longitude"]
+            )
+            
+            # Format setup instructions
+            setup_instructions = BROWSER_SETUP_INSTRUCTIONS % permissions_script
+            
+            # Install and initialize the browser
+            install_result = await run_agent_with_retry(agent, setup_instructions)
+            
+            logfire.info("Browser installation", result=install_result.output if hasattr(install_result, 'output') else install_result.data)
+            print("Browser setup complete with custom user agent and location permissions")
+            
+            # Skip pre-initializing for now to avoid errors
+            # We'll set permissions when needed for specific searches
+            
         except Exception as e:
             error_msg = f"Browser installation failed: {str(e)}"
             logfire.error(error_msg)
@@ -189,18 +436,89 @@ async def main():
         print("="*50 + "\n")
         
         result = await run_agent_with_retry(agent, initial_prompt)
+        
+        # Variables to track user intent
+        last_location = None
+        last_budget = None
+        last_property_type = None  # "rent" or "buy"
+        
         while True:
             # Log the agent's response
-            logfire.info("Agent response", response=result.data)
-            print(f"\n{result.data}")
+            logfire.info("Agent response", response=result.output if hasattr(result, 'output') else result.data)
+            print(f"\n{result.output if hasattr(result, 'output') else result.data}")
             user_input = input("\nYou: ")
             # Exit condition
             if user_input.lower() in ["exit", "quit", "bye"]:
                 print("\nThank you for using the real estate browsing assistant!")
                 break
+            
             # Log the user input
             logfire.info("User input", input=user_input)
-            # Run the agent with the user input
+            
+            # Analyze user input for location and property intent
+            user_input_lower = user_input.lower()
+            
+            # Check for locations in user query
+            detected_location = None
+            for location in CITY_GEOLOCATION.keys():
+                if location in user_input_lower:
+                    detected_location = location
+                    last_location = location
+                    break
+            
+            # Check for rent/buy intent
+            if "rent" in user_input_lower or "rental" in user_input_lower:
+                last_property_type = "rent"
+            elif "buy" in user_input_lower or "purchase" in user_input_lower:
+                last_property_type = "buy"
+            
+            # Look for budget indicators
+            budget_indicators = ["budget", "afford", "cost", "price", "k", "lakh", "cr", "crore"]
+            has_budget_indicator = any(indicator in user_input_lower for indicator in budget_indicators)
+            
+            # If we have both location and property type, try to use our special bypass method
+            if detected_location and last_property_type:
+                try:
+                    print(f"Searching for {last_property_type} properties in {detected_location}...")
+                    
+                    # Choose a site based on property type
+                    if last_property_type == "rent":
+                        # For rentals, nobroker is often good
+                        site_name = "nobroker"
+                        site_url = REAL_ESTATE_WEBSITES[site_name]
+                        site_path = SEARCH_TEMPLATES[site_name]["rent"].format(city=detected_location)
+                        full_url = f"{site_url}{site_path}"
+                    else:
+                        # For buying, try 99acres
+                        site_name = "99acres"
+                        site_url = REAL_ESTATE_WEBSITES[site_name]
+                        site_path = SEARCH_TEMPLATES[site_name]["buy"].format(city=detected_location)
+                        full_url = f"{site_url}{site_path}"
+                    
+                    # Use our helper to visit with bypass
+                    await visit_website_with_bypass(agent, full_url, detected_location)
+                    
+                    # Let the agent continue with its normal flow but with added context
+                    specific_prompt = f"""
+                    I've helped you navigate to {full_url} with location permissions for {detected_location} 
+                    and cookie consent bypassing. 
+                    
+                    Please answer the user's question: "{user_input}"
+                    
+                    Based on what you can see on the website, provide information about properties in {detected_location} 
+                    that match their criteria. If you can't see specific properties, explain why and provide 
+                    general information about that area.
+                    """
+                    
+                    result = await run_agent_with_retry(agent, specific_prompt, 
+                                            message_history=result.new_messages())
+                    continue
+                
+                except Exception as e:
+                    print(f"Error with special search: {str(e)}")
+                    # Fall back to normal behavior
+            
+            # Normal flow - just process the user input
             try:
                 result = await run_agent_with_retry(agent, user_input, 
                                         message_history=result.new_messages())

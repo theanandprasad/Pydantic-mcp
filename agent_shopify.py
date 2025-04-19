@@ -24,6 +24,7 @@ if missing_vars:
 
 # Extract domain from store URL for MYSHOPIFY_DOMAIN
 store_url = os.environ.get("SHOPIFY_STORE_URL")
+# Ensure the URL doesn't have protocol prefixes
 myshopify_domain = store_url.replace("https://", "").replace("http://", "")
 if not myshopify_domain.endswith("myshopify.com"):
     myshopify_domain = f"{myshopify_domain}.myshopify.com"
@@ -31,13 +32,25 @@ if not myshopify_domain.endswith("myshopify.com"):
 fetch_server = MCPServerStdio('python', ["-m", "mcp_server_fetch"])
 shopify_server = MCPServerStdio('npx', ["-y", "shopify-mcp-server"], env={
     "SHOPIFY_ACCESS_TOKEN": os.environ.get("SHOPIFY_ACCESS_TOKEN"),
-    "MYSHOPIFY_DOMAIN": os.environ.get("SHOPIFY_STORE_URL")
+    "MYSHOPIFY_DOMAIN": myshopify_domain,
+    "SHOPIFY_API_VERSION": os.environ.get("SHOPIFY_API_VERSION")
 })
 
-# The library will automatically use the API key from environment variables
-agent = Agent('anthropic:claude-3-5-sonnet-latest',
-instrument=True,
-mcp_servers=[fetch_server, shopify_server],
+print(f"Using Shopify domain: {myshopify_domain}")
+
+# Extract the API key from environment variables
+api_key = os.environ.get("ANTHROPIC_API_KEY")
+if not api_key:
+    raise ValueError("ANTHROPIC_API_KEY environment variable is not set or is empty")
+
+print(f"Using API key: {api_key[:8]}...")
+
+# Pass the API key explicitly to the Agent constructor
+agent = Agent(
+    model='claude-3-5-sonnet-latest',
+    api_key=api_key,
+    instrument=True,
+    mcp_servers=[fetch_server, shopify_server],
 )
 
 async def main():
